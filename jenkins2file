@@ -1,0 +1,38 @@
+pipeline {
+    agent any
+    environment {
+        JIRA_BASE_URL = 'https://your-jira-instance.atlassian.net'
+        JIRA_USERNAME = 'your-email@example.com'
+        JIRA_API_TOKEN = 'your-api-token'
+        TEST_PLAN_KEY = 'TP-123' // Your Test Plan key
+        PROJECT_KEY = 'YOUR_PROJECT_KEY' // Your Jira project key
+    }
+    stages {
+        stage('Build and Test') {
+            steps {
+                // Your build and test steps, generating the Cucumber JSON report
+                sh './gradlew test'
+            }
+        }
+        stage('Upload Cucumber JSON to Xray') {
+            steps {
+                script {
+                    // Define the path to the Cucumber JSON report
+                    def cucumberReportPath = 'build/reports/cucumber.json'
+
+                    // Create Test Execution using Xray Jenkins Plugin
+                    xrayCreateTestExecution testExecutionKeyVariable: 'testExecutionKey', 
+                                            projectKey: "${env.PROJECT_KEY}", 
+                                            testExecutionSummary: 'Automated Test Execution', 
+                                            testExecutionDescription: 'Automated Test Execution created by Jenkins', 
+                                            testPlanKey: "${env.TEST_PLAN_KEY}"
+
+                    // Upload the Cucumber JSON report to Xray
+                    xrayImportResults executionKey: "${testExecutionKey}", 
+                                      filePath: cucumberReportPath, 
+                                      inputType: 'cucumberJson'
+                }
+            }
+        }
+    }
+}
