@@ -1,0 +1,59 @@
+pipeline {
+    agent any
+    environment {
+        JIRA_BASE_URL = 'https://your-jira-instance.atlassian.net'
+        JIRA_USERNAME = 'your-email@example.com'
+        JIRA_API_TOKEN = 'your-api-token'
+        XRAY_CLIENT_ID = 'your-xray-client-id'
+        XRAY_CLIENT_SECRET = 'your-xray-client-secret'
+        TEST_PLAN_KEY = 'TP-123' // Your Test Plan key
+        PROJECT_KEY = 'YOUR_PROJECT_KEY' // Your Jira project key
+    }
+    stages {
+        stage('Build and Test') {
+            steps {
+                // Your build and test steps, generating the Cucumber JSON report
+                sh './gradlew test'
+            }
+        }
+        stage('Upload Cucumber JSON to Xray') {
+            steps {
+                script {
+                    // Obtain Xray authentication token
+                    sh """
+                    curl -H "Content-Type: application/json" -X POST -d '{"client_id": "${env.XRAY_CLIENT_ID}", "client_secret": "${env.XRAY_CLIENT_SECRET}"}' ${env.JIRA_BASE_URL}/api/v2/authenticate > auth_response.json
+                    """
+                    def authToken = sh(script: 'cat auth_response.json', returnStdout: true).trim()
+
+                    // Create Test Execution
+                    sh """
+                    curl -H "Content-Type: application/json" -H "Authorization: Bearer ${authToken}" -X POST -d '{
+                        "fields": {
+                            "project": {"key": "${env.PROJECT_KEY}"},
+                            "summary": "Automated Test Execution",
+                            "issuetype": {"name": "Test Execution"},
+                            "description": "Automated Test Execution created by Jenkins"
+                        }
+                    }' ${env.JIRA_BASE_URL}/rest/api/2/issue > test_exec_response.json
+                    """
+                    def testExecutionKey = sh(script: 'cat test_exec_response.json | jq -r .key', returnStdout: true).trim()
+
+                    // Upload the Cucumber JSON report to the Test Execution
+                    sh """
+                    curl -H "Content-Type: application/json" -H "Authorization: Bearer ${authToken}" -X POST --data @build/reports/cucumber.json "${env.JIRA_BASE_URL}/api/v2/import/execution/cucumber?testExecIssueKey=${testExecutionKey}"
+                    """
+
+                    // Associate Test Execution with Test Plan
+                    sh """
+                    curl -H "Content-Type: application/json" -H "Authorization: Bearer ${authToken}" -X POST -d '{
+                        "testExecIssueKey": "${testExecutionKey}",
+                        "testPlanKey": "${env.TEST_PLAN_KEY}"
+                    }' ${env.JIRA_BASE_URL}/api/v2/testplan/addtests
+                    """
+                }
+            }
+        }
+    }
+}
+
+
